@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 from rich.console import Console
 from scipy.spatial.distance import cosine
 from scipy.stats import pearsonr
@@ -14,6 +16,12 @@ from dyad.generate import load_generations
 from dyad.vectors import load_vectors
 
 console = Console()
+
+# Set style for publication-quality plots
+sns.set_style("whitegrid")
+plt.rcParams["figure.dpi"] = 100
+plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["font.size"] = 10
 
 
 def compute_delta_proj(
@@ -340,3 +348,258 @@ def analyze_generation_pair(
         "char_difference": char_diff,
         "num_layers": len(trait_vectors),
     }
+
+
+def plot_layer_projection_curves(
+    delta_proj: dict[int, float],
+    output_path: Path,
+    title: Optional[str] = None,
+    alpha_values: Optional[dict[float, dict[int, float]]] = None,
+) -> None:
+    """Plot layer projection curves (Δproj vs layer index).
+
+    Args:
+        delta_proj: Dictionary mapping layer index to Δproj value
+        output_path: Path to save the plot
+        title: Optional plot title
+        alpha_values: Optional dictionary mapping alpha to delta_proj dicts for multiple curves
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    if alpha_values is None:
+        # Single curve
+        layers = sorted(delta_proj.keys())
+        values = [delta_proj[l] for l in layers]
+
+        ax.plot(layers, values, marker="o", linewidth=2, markersize=8, label="Δproj")
+        ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+    else:
+        # Multiple curves for different alpha values
+        for alpha, delta_dict in sorted(alpha_values.items()):
+            layers = sorted(delta_dict.keys())
+            values = [delta_dict[l] for l in layers]
+            ax.plot(
+                layers,
+                values,
+                marker="o",
+                linewidth=2,
+                markersize=6,
+                label=f"α={alpha}",
+            )
+        ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+
+    ax.set_xlabel("Layer Index", fontsize=12)
+    ax.set_ylabel("Δproj (Projection Change)", fontsize=12)
+    ax.set_title(title or "Layer Projection Curves", fontsize=14, fontweight="bold")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+    console.print(f"[green]Saved projection curve to {output_path}[/green]")
+
+
+def plot_textual_polarity_shifts(
+    generations: dict[float, str],
+    output_path: Path,
+    title: Optional[str] = None,
+) -> None:
+    """Plot textual polarity shifts (histograms and scatter plots).
+
+    Args:
+        generations: Dictionary mapping alpha to generated text
+        output_path: Path to save the plot
+        title: Optional plot title
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Extract metrics
+    alphas = sorted(generations.keys())
+    lengths = [len(text.split()) for text in generations.values()]
+    char_counts = [len(text) for text in generations.values()]
+
+    # Histogram of text lengths
+    ax1 = axes[0]
+    ax1.hist(lengths, bins=min(10, len(lengths)), edgecolor="black", alpha=0.7)
+    ax1.set_xlabel("Text Length (words)", fontsize=11)
+    ax1.set_ylabel("Frequency", fontsize=11)
+    ax1.set_title("Text Length Distribution", fontsize=12, fontweight="bold")
+    ax1.grid(True, alpha=0.3)
+
+    # Scatter plot: alpha vs text length
+    ax2 = axes[1]
+    ax2.scatter(alphas, lengths, s=100, alpha=0.7, edgecolors="black")
+    ax2.set_xlabel("Steering Strength (α)", fontsize=11)
+    ax2.set_ylabel("Text Length (words)", fontsize=11)
+    ax2.set_title("Steering Strength vs Text Length", fontsize=12, fontweight="bold")
+    ax2.grid(True, alpha=0.3)
+    ax2.axvline(x=0, color="gray", linestyle="--", alpha=0.5)
+
+    plt.suptitle(title or "Textual Polarity Shifts", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+    console.print(f"[green]Saved polarity shift plot to {output_path}[/green]")
+
+
+def plot_activation_shift_heatmap(
+    activations_base: dict[int, np.ndarray],
+    activations_steered: dict[int, np.ndarray],
+    output_path: Path,
+    title: Optional[str] = None,
+    max_features: int = 50,
+) -> None:
+    """Plot activation shift heatmap.
+
+    Args:
+        activations_base: Dictionary mapping layer index to base activations
+        activations_steered: Dictionary mapping layer index to steered activations
+        output_path: Path to save the plot
+        title: Optional plot title
+        max_features: Maximum number of features to display (for visualization)
+    """
+    # Get common layers
+    common_layers = sorted(
+        set(activations_base.keys()) & set(activations_steered.keys())
+    )
+
+    if not common_layers:
+        console.print("[yellow]Warning: No common layers for heatmap[/yellow]")
+        return
+
+    # Compute mean shift per layer
+    shifts = []
+    for layer_idx in common_layers:
+        base = activations_base[layer_idx]
+        steered = activations_steered[layer_idx]
+
+        # Mean-pool if needed
+        if len(base.shape) > 1:
+            base_mean = np.mean(base, axis=0)
+            steered_mean = np.mean(steered, axis=0)
+        else:
+            base_mean = base
+            steered_mean = steered
+
+        shift = steered_mean - base_mean
+        shifts.append(shift)
+
+    # Stack into matrix: (layers, features)
+    shift_matrix = np.stack(shifts)
+
+    # Limit features for visualization
+    if shift_matrix.shape[1] > max_features:
+        # Sample features uniformly
+        feature_indices = np.linspace(
+            0, shift_matrix.shape[1] - 1, max_features, dtype=int
+        )
+        shift_matrix = shift_matrix[:, feature_indices]
+        feature_labels = [f"F{i}" for i in feature_indices]
+    else:
+        feature_labels = [f"F{i}" for i in range(shift_matrix.shape[1])]
+
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(14, max(6, len(common_layers) * 0.5)))
+    im = ax.imshow(
+        shift_matrix,
+        aspect="auto",
+        cmap="RdBu_r",
+        interpolation="nearest",
+    )
+
+    # Set labels
+    ax.set_xticks(range(len(feature_labels)))
+    ax.set_xticklabels(feature_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(len(common_layers)))
+    ax.set_yticklabels([f"Layer {l}" for l in common_layers], fontsize=10)
+
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Activation Shift", fontsize=11)
+
+    ax.set_xlabel("Feature Index", fontsize=12)
+    ax.set_ylabel("Layer Index", fontsize=12)
+    ax.set_title(
+        title or "Activation Shift Heatmap", fontsize=14, fontweight="bold"
+    )
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+    console.print(f"[green]Saved activation heatmap to {output_path}[/green]")
+
+
+def plot_transfer_correlation(
+    teacher_delta_proj: dict[int, float],
+    student_delta_proj: dict[int, float],
+    output_path: Path,
+    title: Optional[str] = None,
+) -> None:
+    """Plot teacher-student transfer correlation scatterplot.
+
+    Args:
+        teacher_delta_proj: Dictionary mapping layer index to teacher Δproj
+        student_delta_proj: Dictionary mapping layer index to student Δproj
+        output_path: Path to save the plot
+        title: Optional plot title
+    """
+    # Get common layers
+    common_layers = sorted(
+        set(teacher_delta_proj.keys()) & set(student_delta_proj.keys())
+    )
+
+    if len(common_layers) < 2:
+        console.print("[yellow]Warning: Insufficient layers for correlation plot[/yellow]")
+        return
+
+    teacher_values = [teacher_delta_proj[l] for l in common_layers]
+    student_values = [student_delta_proj[l] for l in common_layers]
+
+    # Compute correlation
+    correlation = compute_transfer_correlation(teacher_delta_proj, student_delta_proj)
+    r = correlation["pearson_r"]
+
+    # Create scatter plot
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    ax.scatter(teacher_values, student_values, s=100, alpha=0.7, edgecolors="black")
+
+    # Add diagonal line
+    min_val = min(min(teacher_values), min(student_values))
+    max_val = max(max(teacher_values), max(student_values))
+    ax.plot([min_val, max_val], [min_val, max_val], "r--", alpha=0.5, label="y=x")
+
+    # Add correlation text
+    ax.text(
+        0.05,
+        0.95,
+        f"r = {r:.3f}\np = {correlation['pearson_p']:.3e}",
+        transform=ax.transAxes,
+        fontsize=12,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+    )
+
+    ax.set_xlabel("Teacher Δproj", fontsize=12)
+    ax.set_ylabel("Student Δproj", fontsize=12)
+    ax.set_title(
+        title or f"Teacher-Student Transfer (r={r:.3f})",
+        fontsize=14,
+        fontweight="bold",
+    )
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+
+    console.print(f"[green]Saved transfer correlation plot to {output_path}[/green]")
