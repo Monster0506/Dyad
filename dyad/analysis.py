@@ -603,3 +603,197 @@ def plot_transfer_correlation(
     plt.close()
 
     console.print(f"[green]Saved transfer correlation plot to {output_path}[/green]")
+
+
+def generate_analysis_report(
+    delta_proj: dict[int, float],
+    generations: Optional[dict[float, str]] = None,
+    stability: Optional[dict[str, float]] = None,
+    transfer_correlation: Optional[dict[str, float]] = None,
+    metadata: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Generate comprehensive analysis report with all metrics.
+
+    Args:
+        delta_proj: Dictionary mapping layer index to Δproj value
+        generations: Optional dictionary mapping alpha to generated text
+        stability: Optional stability metrics
+        transfer_correlation: Optional transfer correlation metrics
+        metadata: Optional additional metadata
+
+    Returns:
+        Dictionary containing complete analysis report
+    """
+    # Evaluate steering success
+    success_eval = evaluate_steering_success(delta_proj, stability)
+
+    # Build report
+    report = {
+        "delta_projection": {
+            "per_layer": {str(k): v for k, v in delta_proj.items()},
+            "mean": success_eval["mean_delta_proj"],
+            "max": success_eval["max_delta_proj"],
+        },
+        "steering_evaluation": {
+            "effect_strength": success_eval["effect_strength"],
+            "is_successful": success_eval["is_successful"],
+        },
+    }
+
+    # Add stability if provided
+    if stability:
+        report["stability"] = stability
+        if "is_stable" in success_eval:
+            report["steering_evaluation"]["is_stable"] = success_eval["is_stable"]
+
+    # Add transfer correlation if provided
+    if transfer_correlation:
+        report["transfer_correlation"] = transfer_correlation
+
+    # Add generation statistics if provided
+    if generations:
+        gen_stats = {}
+        for alpha, text in generations.items():
+            gen_stats[str(alpha)] = {
+                "length_words": len(text.split()),
+                "length_chars": len(text),
+            }
+        report["generation_statistics"] = gen_stats
+
+    # Add metadata
+    if metadata:
+        report["metadata"] = metadata
+
+    return report
+
+
+def save_analysis_report(
+    report: dict[str, Any],
+    output_path: Path,
+) -> None:
+    """Save analysis report to JSON file.
+
+    Args:
+        report: Analysis report dictionary
+        output_path: Path to save JSON file
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    console.print(f"[green]Saved analysis report to {output_path}[/green]")
+
+
+def generate_textual_summary(
+    report: dict[str, Any],
+    experiment_name: Optional[str] = None,
+) -> str:
+    """Generate textual summary of analysis results.
+
+    Args:
+        report: Analysis report dictionary
+        experiment_name: Optional experiment name/identifier
+
+    Returns:
+        Markdown-formatted textual summary
+    """
+    lines = []
+    
+    if experiment_name:
+        lines.append(f"# Analysis Summary: {experiment_name}")
+    else:
+        lines.append("# Analysis Summary")
+    
+    lines.append("")
+    lines.append("## Steering Evaluation")
+    lines.append("")
+    
+    eval_data = report.get("steering_evaluation", {})
+    effect_strength = eval_data.get("effect_strength", "unknown")
+    is_successful = eval_data.get("is_successful", False)
+    
+    lines.append(f"- **Effect Strength**: {effect_strength}")
+    lines.append(f"- **Successful**: {'Yes' if is_successful else 'No'}")
+    
+    if "is_stable" in eval_data:
+        lines.append(f"- **Stable**: {'Yes' if eval_data['is_stable'] else 'No'}")
+    
+    lines.append("")
+    lines.append("## Delta Projection Metrics")
+    lines.append("")
+    
+    delta_data = report.get("delta_projection", {})
+    mean_delta = delta_data.get("mean", 0.0)
+    max_delta = delta_data.get("max", 0.0)
+    
+    lines.append(f"- **Mean Δproj**: {mean_delta:.6f}")
+    lines.append(f"- **Max Δproj**: {max_delta:.6f}")
+    
+    # Per-layer breakdown
+    per_layer = delta_data.get("per_layer", {})
+    if per_layer:
+        lines.append("")
+        lines.append("### Per-Layer Δproj")
+        lines.append("")
+        for layer, value in sorted(per_layer.items(), key=lambda x: int(x[0])):
+            lines.append(f"- Layer {layer}: {value:.6f}")
+    
+    # Stability metrics
+    if "stability" in report:
+        lines.append("")
+        lines.append("## Stability Metrics")
+        lines.append("")
+        stability = report["stability"]
+        lines.append(f"- **Mean Δproj**: {stability.get('mean_delta_proj', 0.0):.6f}")
+        lines.append(f"- **Std Δproj**: {stability.get('std_delta_proj', 0.0):.6f}")
+        lines.append(f"- **Consistency**: {stability.get('consistency', 0.0):.2f}")
+    
+    # Transfer correlation
+    if "transfer_correlation" in report:
+        lines.append("")
+        lines.append("## Transfer Correlation")
+        lines.append("")
+        transfer = report["transfer_correlation"]
+        lines.append(f"- **Pearson r**: {transfer.get('pearson_r', 0.0):.4f}")
+        lines.append(f"- **P-value**: {transfer.get('pearson_p', 1.0):.3e}")
+        lines.append(f"- **Transfer Strength**: {transfer.get('transfer_strength', 'none')}")
+    
+    # Generation statistics
+    if "generation_statistics" in report:
+        lines.append("")
+        lines.append("## Generation Statistics")
+        lines.append("")
+        gen_stats = report["generation_statistics"]
+        for alpha, stats in sorted(gen_stats.items(), key=lambda x: float(x[0])):
+            lines.append(f"- α={alpha}: {stats.get('length_words', 0)} words, {stats.get('length_chars', 0)} chars")
+    
+    # Metadata
+    if "metadata" in report:
+        lines.append("")
+        lines.append("## Metadata")
+        lines.append("")
+        metadata = report["metadata"]
+        for key, value in metadata.items():
+            lines.append(f"- **{key}**: {value}")
+    
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("*Generated by Dyad analysis module*")
+    
+    return "\n".join(lines)
+
+
+def save_textual_summary(
+    summary: str,
+    output_path: Path,
+) -> None:
+    """Save textual summary to markdown file.
+
+    Args:
+        summary: Markdown-formatted summary text
+        output_path: Path to save markdown file
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(summary)
+    console.print(f"[green]Saved textual summary to {output_path}[/green]")
