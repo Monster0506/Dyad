@@ -18,6 +18,9 @@ dependencies = [
     "click",
 ]
 
+[project.scripts]
+dyad = "dyad.cli:cli"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
