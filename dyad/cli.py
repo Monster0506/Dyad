@@ -328,9 +328,7 @@ def steer(
         # Load vectors from experiment
         vectors_path = experiment / "vectors" / "trait_vectors.npz"
         if not vectors_path.exists():
-            console.print(
-                f"[red]Trait vectors not found at {vectors_path}[/red]"
-            )
+            console.print(f"[red]Trait vectors not found at {vectors_path}[/red]")
             raise click.Abort()
 
         vectors = load_vectors(vectors_path)
@@ -346,7 +344,9 @@ def steer(
 
         # Get prompt
         if prompt is None:
-            console.print("[bold]Enter prompt (press Ctrl+D or Ctrl+Z when done):[/bold]")
+            console.print(
+                "[bold]Enter prompt (press Ctrl+D or Ctrl+Z when done):[/bold]"
+            )
             try:
                 prompt = click.get_text_stream("stdin").read().strip()
             except Exception:
@@ -365,7 +365,9 @@ def steer(
         console.print(f"[bold blue]Dyad: Activation Steering[/bold blue]")
         console.print(f"Model: {model}")
         console.print(f"Trait: {trait}")
-        console.print(f"Prompt: {prompt[:50]}..." if len(prompt) > 50 else f"Prompt: {prompt}")
+        console.print(
+            f"Prompt: {prompt[:50]}..." if len(prompt) > 50 else f"Prompt: {prompt}"
+        )
 
         # Generate text
         if parallel:
@@ -491,4 +493,3 @@ def seed():
 
 if __name__ == "__main__":
     cli()
-

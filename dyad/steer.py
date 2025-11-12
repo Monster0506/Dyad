@@ -350,4 +350,3 @@ class MultiSteerHook:
         finally:
             self.deactivate()
             self.detach()
-

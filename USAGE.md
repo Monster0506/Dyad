@@ -50,7 +50,7 @@ Run the `discover` command to extract activations and compute trait vectors:
 
 ```bash
 uv run dyad discover \
-    --model gpt2 \
+    --model Qwen/Qwen2.5-7B-Instruct \
     --data data/formality_pairs.json \
     --layers last-4 \
     --batch-size 8 \
@@ -58,7 +58,7 @@ uv run dyad discover \
 ```
 
 **Parameters:**
-- `--model`: Model identifier (e.g., `gpt2`, `gpt2-medium`, `Qwen/Qwen2.5-1.5B-Instruct`)
+- `--model`: Model identifier (e.g., `gpt2`, `gpt2-medium`, `Qwen/Qwen2.5-7B-Instruct`)
 - `--data`: Path to your contrastive pairs JSON file
 - `--layers`: Which layers to use (e.g., `last-4`, `28,29,30,31`, or omit for default last-4)
 - `--batch-size`: Batch size for processing (adjust based on memory)
@@ -84,7 +84,7 @@ Use the `steer` command to generate text with activation steering:
 
 ```bash
 uv run dyad steer \
-    --model gpt2 \
+    --model Qwen/Qwen2.5-7B-Instruct \
     --trait formality \
     --alpha 1.0 \
     --prompt "Write an email to my professor" \
@@ -175,7 +175,7 @@ uv run dyad steer \
 ## Tips for Better Results
 
 1. **More Training Data**: Use 20-50+ contrastive pairs for stronger trait vectors
-2. **Larger Models**: Try `gpt2-medium`, `gpt2-large`, or `Qwen/Qwen2.5-1.5B-Instruct` for better quality
+2. **Larger Models**: Try `gpt2-medium`, `gpt2-large`, or `Qwen/Qwen2.5-7B-Instruct` for better quality
 3. **More Layers**: Steer more layers (e.g., `last-6` or `last-8`) for stronger effects
 4. **Higher Alpha**: Use α values in range [-2.0, 2.0] for more noticeable effects (but may reduce quality)
 5. **Reproducibility**: Use `--seed` for consistent comparisons
@@ -208,4 +208,5 @@ uv run dyad steer \
 - Experiment with different models
 - Use `dyad analyze` (coming in Phase III) to quantify steering effects
 - Fine-tune a student model with `dyad student` (coming in Phase IV)
+
 

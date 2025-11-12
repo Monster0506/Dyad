@@ -10,6 +10,7 @@ import torch.nn as nn
 from rich.console import Console
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 
+
 console = Console()
 
 
@@ -294,9 +295,7 @@ def load_model_and_tokenizer(
 
     try:
         # Load tokenizer
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_name, local_files_only=offline
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=offline)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
 
@@ -322,7 +321,4 @@ def load_model_and_tokenizer(
             raise ModelUnsupportedError(
                 f"Model {model_name} not found in local cache. Set offline=False to download."
             ) from e
-        raise ModelUnsupportedError(
-            f"Failed to load model {model_name}: {e}"
-        ) from e
-
+        raise ModelUnsupportedError(f"Failed to load model {model_name}: {e}") from e

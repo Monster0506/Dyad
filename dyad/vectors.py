@@ -222,4 +222,3 @@ def validate_vector_shapes(
             )
 
     return True
-

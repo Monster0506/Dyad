@@ -206,4 +206,3 @@ def load_generations(path: Path) -> dict:
         }
 
     return data
-
