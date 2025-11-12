@@ -34,14 +34,17 @@ which explores how subtle linguistic biases might propagate through model traini
 
 ### **Quickstart**
 
-```bash
-# Create and run within a uv-managed environment
-uv init dyad
-uv add torch transformers datasets numpy matplotlib
+See [USAGE.md](USAGE.md) for a detailed step-by-step guide on discovering and using trait vectors.
 
-# Example: discover and steer a stylistic trait
-uv run python -m dyad discover --model qwen2.5b --trait formality
-uv run python -m dyad steer --alpha 0.8 --prompt "Write a note of thanks to a mentor"
+**Basic workflow:**
+
+```bash
+# 1. Discover trait vectors from contrastive pairs
+uv run dyad discover --model gpt2 --data data/formality_pairs.json --layers last-4
+
+# 2. Apply steering during generation
+uv run dyad steer --model gpt2 --trait formality --alpha 1.0 \
+    --prompt "Write an email to my professor" --experiment runs/exp-<timestamp>
 ```
 
-Outputs are logged with projection metrics and optional plots for inspection.
+Outputs are saved to experiment directories with vectors, generations, and metadata for analysis.

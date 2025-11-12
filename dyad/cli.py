@@ -14,7 +14,9 @@ from dyad.activations import (
     parse_layer_spec,
 )
 from dyad.data import load_contrastive_pairs
-from dyad.vectors import compute_trait_vector, save_vectors
+from dyad.generate import generate_parallel, save_generations
+from dyad.steer import SteerHook
+from dyad.vectors import compute_trait_vector, load_vectors, save_vectors
 
 console = Console()
 
@@ -170,11 +172,15 @@ def discover(
         activations_dir.mkdir(parents=True, exist_ok=True)
         import numpy as np
 
+        # Convert integer keys to strings for npz format
+        pos_acts_dict = {f"layer_{k}": v for k, v in positive_activations.items()}
+        neg_acts_dict = {f"layer_{k}": v for k, v in negative_activations.items()}
+
         np.savez_compressed(
-            activations_dir / "positive_activations.npz", **positive_activations
+            activations_dir / "positive_activations.npz", **pos_acts_dict
         )
         np.savez_compressed(
-            activations_dir / "negative_activations.npz", **negative_activations
+            activations_dir / "negative_activations.npz", **neg_acts_dict
         )
 
         console.print(f"\n[bold green]✓ Discovery complete![/bold green]")
@@ -191,10 +197,248 @@ def discover(
 
 
 @cli.command()
-def steer():
+@click.option(
+    "--model",
+    required=True,
+    help="Model identifier or local path",
+)
+@click.option(
+    "--trait",
+    required=True,
+    help="Trait name (must match a previous discover run)",
+)
+@click.option(
+    "--alpha",
+    required=True,
+    type=float,
+    help="Steering strength (e.g., 0.5, 1.0, -0.75)",
+)
+@click.option(
+    "--prompt",
+    default=None,
+    help="Input prompt text. If not provided, reads from stdin",
+)
+@click.option(
+    "--experiment",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to experiment directory from discover command. If not provided, searches runs/",
+)
+@click.option(
+    "--num-generations",
+    default=1,
+    type=int,
+    help="Number of generations to produce",
+)
+@click.option(
+    "--max-length",
+    default=100,
+    type=int,
+    help="Maximum generation length",
+)
+@click.option(
+    "--temperature",
+    default=0.7,
+    type=float,
+    help="Sampling temperature",
+)
+@click.option(
+    "--top-p",
+    default=0.9,
+    type=float,
+    help="Nucleus sampling top-p",
+)
+@click.option(
+    "--seed",
+    default=None,
+    type=int,
+    help="Random seed for reproducibility",
+)
+@click.option(
+    "--parallel",
+    is_flag=True,
+    help="Generate parallel completions with multiple alpha values",
+)
+@click.option(
+    "--alpha-range",
+    default="-1.0,0.0,1.0",
+    help="Comma-separated alpha values for parallel generation (e.g., '-1.0,0.0,1.0')",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Output directory. Default: same as experiment directory",
+)
+@click.option(
+    "--offline",
+    is_flag=True,
+    help="Only use local model cache",
+)
+@click.option(
+    "--device",
+    default=None,
+    help="Device to use ('cuda', 'cpu', or None for auto)",
+)
+def steer(
+    model: str,
+    trait: str,
+    alpha: float,
+    prompt: str | None,
+    experiment: Path | None,
+    num_generations: int,
+    max_length: int,
+    temperature: float,
+    top_p: float,
+    seed: int | None,
+    parallel: bool,
+    alpha_range: str,
+    output: Path | None,
+    offline: bool,
+    device: str | None,
+):
     """Apply activation steering on prompts."""
-    console.print("[yellow]Steer command not yet implemented[/yellow]")
-    pass
+    try:
+        # Find experiment directory if not provided
+        if experiment is None:
+            # Search for most recent experiment in runs/
+            runs_dir = Path("runs")
+            if runs_dir.exists():
+                experiments = sorted(
+                    [d for d in runs_dir.iterdir() if d.is_dir()],
+                    key=lambda x: x.stat().st_mtime,
+                    reverse=True,
+                )
+                if experiments:
+                    experiment = experiments[0]
+                    console.print(
+                        f"[yellow]Using most recent experiment: {experiment}[/yellow]"
+                    )
+                else:
+                    console.print(
+                        "[red]No experiments found. Run 'dyad discover' first.[/red]"
+                    )
+                    raise click.Abort()
+            else:
+                console.print(
+                    "[red]No runs directory found. Run 'dyad discover' first.[/red]"
+                )
+                raise click.Abort()
+
+        # Load vectors from experiment
+        vectors_path = experiment / "vectors" / "trait_vectors.npz"
+        if not vectors_path.exists():
+            console.print(
+                f"[red]Trait vectors not found at {vectors_path}[/red]"
+            )
+            raise click.Abort()
+
+        vectors = load_vectors(vectors_path)
+
+        # Load model and tokenizer
+        try:
+            model_obj, tokenizer = load_model_and_tokenizer(
+                model, device=device, offline=offline
+            )
+        except ModelUnsupportedError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise click.Abort()
+
+        # Get prompt
+        if prompt is None:
+            console.print("[bold]Enter prompt (press Ctrl+D or Ctrl+Z when done):[/bold]")
+            try:
+                prompt = click.get_text_stream("stdin").read().strip()
+            except Exception:
+                console.print("[red]Failed to read prompt from stdin[/red]")
+                raise click.Abort()
+
+        if not prompt:
+            console.print("[red]Prompt cannot be empty[/red]")
+            raise click.Abort()
+
+        # Determine output directory
+        if output is None:
+            output = experiment / "generations"
+        output.mkdir(parents=True, exist_ok=True)
+
+        console.print(f"[bold blue]Dyad: Activation Steering[/bold blue]")
+        console.print(f"Model: {model}")
+        console.print(f"Trait: {trait}")
+        console.print(f"Prompt: {prompt[:50]}..." if len(prompt) > 50 else f"Prompt: {prompt}")
+
+        # Generate text
+        if parallel:
+            # Parse alpha range
+            try:
+                alpha_values = [float(x.strip()) for x in alpha_range.split(",")]
+            except ValueError:
+                console.print(f"[red]Invalid alpha-range format: {alpha_range}[/red]")
+                raise click.Abort()
+
+            console.print(f"Generating parallel completions with α={alpha_values}")
+            from dyad.generate import generate_parallel
+
+            generations = generate_parallel(
+                model_obj,
+                tokenizer,
+                prompt,
+                vectors_path,
+                alpha_values,
+                max_length=max_length,
+                temperature=temperature,
+                top_p=top_p,
+                seed=seed,
+            )
+        else:
+            # Single generation
+            console.print(f"Generating with α={alpha}")
+            from dyad.generate import generate_text
+
+            steer_hook = SteerHook(vectors, alpha=alpha)
+            generated_text = generate_text(
+                model_obj,
+                tokenizer,
+                prompt,
+                steer_hook=steer_hook,
+                max_length=max_length,
+                temperature=temperature,
+                top_p=top_p,
+                seed=seed,
+            )
+            generations = {alpha: generated_text}
+
+        # Save generations
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        output_file = output / f"generation_{timestamp}.json"
+
+        metadata = {
+            "model": model,
+            "trait": trait,
+            "experiment": str(experiment),
+            "max_length": max_length,
+            "temperature": temperature,
+            "top_p": top_p,
+            "seed": seed,
+        }
+
+        save_generations(generations, output_file, prompt, metadata)
+
+        # Display results
+        console.print("\n[bold green]Generated text:[/bold green]")
+        for alpha_val, text in sorted(generations.items()):
+            console.print(f"\n[bold]α={alpha_val}:[/bold]")
+            console.print(text)
+
+        console.print(f"\n[bold green]✓ Generation complete![/bold green]")
+        console.print(f"Saved to: {output_file}")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        import traceback
+
+        console.print(traceback.format_exc())
+        raise click.Abort()
 
 
 @cli.command()
